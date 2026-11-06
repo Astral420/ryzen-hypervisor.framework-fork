@@ -47,6 +47,12 @@ extern void hv_set_task_target(void *target);
 extern void hv_set_thread_target(void *target);
 extern void *hv_get_task_target(void);
 extern void *hv_get_thread_target(void);
+
+/* Note on thread names: xnu does have thread_get_thread_name(), which answers the pthread name
+ * (bsd_getthreadname(get_bsdthread_info(thread))), but no kext symbol set exports it -- config/*.exports
+ * of xnu-12377 list only thread_has_thread_name and thread_set_thread_name, and thread_info is in none
+ * either (scripts/check-kext-symbols.sh fails both against the running kernel). A kext therefore cannot
+ * read the name its caller gave itself, see the comment above tVcpuCreate. */
 }
 
 namespace {
@@ -408,6 +414,15 @@ kern_return_t tVmDestroy(void *target, uint64_t arg)
 
 void fpuToPage(HvVcpu *v);
 
+/* HyperKit names every vCPU thread "vcpu:<n>" before it calls hv_vcpu_create and asserts that it gets
+ * id <n> back. A thread that loses the creation race would otherwise be handed the next free slot, and
+ * HyperKit exits(1) right after the call: observed on macOS 26.5.2 with Docker Desktop 4.97.0, where the
+ * thread "vcpu:2" received id 1. The shim honours the contract in userland, where the name is readable
+ * (rhv_core.c asks the backend for the slot the thread name asks for); the trap table here cannot: no
+ * KPI exports a way to read the pthread name of a thread (see the note at the extern declarations
+ * above), so this front end keeps the next-free-slot behaviour, which is what every client that does not
+ * name its threads needs. HyperKit in native mode therefore works with one vCPU; with more, run it
+ * through the shim. */
 kern_return_t tVcpuCreate(void *target, uint64_t arg)
 {
     note(HV_TASK_TRAP, 12, arg);
@@ -442,7 +457,7 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
     IOLockLock(vm->lock);
     unsigned id = 0;
     while (id < kMaxVcpus && vm->vcpu[id])
-        id++;
+        id++;                                          /* the next free slot: no KPI names the client's threads */
     if (id == kMaxVcpus) {
         IOLockUnlock(vm->lock);
         v->cpu->release();

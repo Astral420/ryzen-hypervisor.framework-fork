@@ -26,7 +26,9 @@ Docker's own signature would keep it away from the kext. Docker's original files
 ## Install
 
 You need the kext running (`docs/RYZENTOSH.md`, boot-args `rhv_enable_svm=1 rhv_allow_users=1 amfi_get_out_of_my_way=0x1`). AMFI has to
-be relaxed because the shim is loaded into signed, hardened Docker binaries.
+be relaxed because the shim is loaded into signed, hardened Docker binaries. In **native** mode (the kext is the hypervisor provider) none of
+this is needed since 0.7.9: the kext relaxes code signing for the HyperKit process itself (see docs/NATIVE.md, "Without the AMFI boot-arg"),
+so `./rhv kext --native --no-amfi` boots without the AMFI boot-arg.
 
 From the release bundle:
 
@@ -44,6 +46,9 @@ What the script changes, all inside `/Applications/Docker.app` and your home fol
 - `Contents/Resources/bin/com.docker.hyperkit` becomes a wrapper; the patched binary is `com.docker.hyperkit.real`, Docker's own is `.orig`.
 - `Contents/MacOS/com.docker.backend` becomes a wrapper; Docker's binary is `com.docker.backend.real`.
 - `~/Library/Group Containers/group.com.docker/settings-store.json`: `UseVirtualizationFramework` is set to `false`.
+  That file is JSON, not a plist; it is edited with osascript/perl (`json_set_bool` in the scripts). A plain `plutil -replace`
+  fails on macOS 26 with `Conversion to OpenStep format is not supported`: plutil reads the JSON through its OpenStep plist
+  reader and OpenStep is the one plist format CoreFoundation cannot write.
 - `~/.ryzenhv/lib/libryzenhv.dylib`: the shim the wrappers load.
 
 Undo: `./rhv docker-desktop undo` (or `./scripts/docker-desktop-shim.sh uninstall`).
